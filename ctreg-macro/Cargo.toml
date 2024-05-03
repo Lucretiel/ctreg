@@ -1,0 +1,21 @@
+[package]
+name = "ctreg-macro"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+lazy_format = "2.0.3"
+quote = "1.0.36"
+regex-syntax = { workspace = true }
+thiserror = { workspace = true }
+syn = { version = "2.0.60", default-features = false, features = [
+    "parsing",
+    "proc-macro",
+] }
+itertools = "0.12.1"
+proc-macro2 = { version = "1.0.81", default-features = false }
+
+[lib]
+proc-macro = true
+
+[features]
