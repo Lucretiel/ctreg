@@ -1,5 +1,5 @@
 #[doc(hidden)]
-pub mod private {
+pub mod ඞ {
     pub use ::regex_automata;
     pub use ::regex_syntax;
 }
