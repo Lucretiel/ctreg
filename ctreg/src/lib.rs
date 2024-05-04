@@ -1,3 +1,9 @@
+#[doc(hidden)]
+pub mod private {
+    pub use ::regex_automata;
+    pub use ::regex_syntax;
+}
+
 pub fn add(left: usize, right: usize) -> usize {
     left + right
 }

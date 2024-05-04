@@ -1,3 +1,5 @@
+mod lazy_quote;
+
 extern crate proc_macro;
 use proc_macro::TokenStream;
 
@@ -160,7 +162,7 @@ struct Prefix;
 
 impl ToTokens for Prefix {
     fn to_tokens(&self, mut tokens: &mut TokenStream2) {
-        push_quote!(tokens, { ::regex_syntax::hir });
+        push_quote!(tokens, { ::ctreg::private::regex_automata::hir });
     }
 }
 
@@ -221,20 +223,6 @@ impl ToTokens for HirToTokensAdapter<&Hir> {
 impl ToTokens for HirToTokensAdapter<&Class> {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
         todo!()
-    }
-}
-
-impl<T> ToTokens for Option<T>
-where
-    T: ToTokens,
-{
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
-        match *self {
-            Some(ref item) => push_quote!(tokens, {
-                ::core::Option::Some(#item)
-            }),
-            None => push_quote!(tokens, { ::core::Option::None }),
-        }
     }
 }
 
