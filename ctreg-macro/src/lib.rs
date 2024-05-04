@@ -1,14 +1,15 @@
-mod lazy_quote;
-
 extern crate proc_macro;
 use proc_macro::TokenStream;
 
 use itertools::Itertools;
 use lazy_format::lazy_format;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Literal as LiteralToken, TokenStream as TokenStream2};
 use quote::{quote, quote_each_token, ToTokens};
 use regex_syntax::{
-    hir::{self, Capture, Class, Hir, HirKind, Literal, Repetition, Visitor},
+    hir::{
+        self, Capture, Class, ClassUnicode, ClassUnicodeRange, Hir, HirKind, Literal, Look,
+        Repetition, Visitor,
+    },
     parse as parse_regex,
 };
 use syn::{
@@ -18,6 +19,7 @@ use syn::{
 use thiserror::Error;
 
 struct Request {
+    public: bool,
     name: syn::Ident,
     type_name: syn::Ident,
     regex: syn::LitStr,
@@ -25,6 +27,7 @@ struct Request {
 
 impl Parse for Request {
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        let public: Option<Token![pub]> = input.parse()?;
         let _static: Token![static] = input.parse()?;
         let name = input.parse()?;
         let _colon: Token![:] = input.parse()?;
@@ -33,6 +36,7 @@ impl Parse for Request {
         let regex = input.parse()?;
 
         Ok(Self {
+            public: public.is_some(),
             name,
             type_name,
             regex,
@@ -85,7 +89,7 @@ enum HirError {
     RepeatingCaptureGroup(String),
 }
 
-fn recurse_hir<'a>(
+fn process_hir_recurse<'a>(
     hir: &'a Hir,
     groups: &mut Vec<GroupInfo<'a>>,
     state: HirRepState,
@@ -100,7 +104,7 @@ fn recurse_hir<'a>(
         // Need to compute the repetition state for repetitions
         HirKind::Repetition(ref repetition) => {
             let state = state.with(repetition);
-            let sub = recurse_hir(&repetition.sub, groups, state)?;
+            let sub = process_hir_recurse(&repetition.sub, groups, state)?;
 
             Ok(Hir::repetition(Repetition {
                 sub: Box::new(sub),
@@ -110,7 +114,7 @@ fn recurse_hir<'a>(
         HirKind::Capture(ref capture) => {
             let Some(name) = capture.name.as_deref() else {
                 // Anonymous groups don't capture in ctreg
-                return recurse_hir(&capture.sub, groups, state);
+                return process_hir_recurse(&capture.sub, groups, state);
             };
 
             if groups.iter().any(|group| group.name == name) {
@@ -129,7 +133,7 @@ fn recurse_hir<'a>(
                 index: group_index,
             });
 
-            let sub = recurse_hir(&capture.sub, groups, state)?;
+            let sub = process_hir_recurse(&capture.sub, groups, state)?;
 
             Ok(Hir::capture(Capture {
                 index: group_index,
@@ -139,7 +143,7 @@ fn recurse_hir<'a>(
         }
         HirKind::Concat(ref concat) => concat
             .iter()
-            .map(|sub| recurse_hir(sub, groups, state))
+            .map(|sub| process_hir_recurse(sub, groups, state))
             .try_collect()
             .map(Hir::concat),
 
@@ -148,7 +152,7 @@ fn recurse_hir<'a>(
         // produce an enum, to reflect that at least one variant will exist
         HirKind::Alternation(ref alt) => alt
             .iter()
-            .map(|sub| recurse_hir(sub, groups, state.and(HirRepState::Optional)))
+            .map(|sub| process_hir_recurse(sub, groups, state.and(HirRepState::Optional)))
             .try_collect()
             .map(Hir::alternation),
     }
@@ -166,63 +170,145 @@ impl ToTokens for Prefix {
     }
 }
 
-struct HirToTokensAdapter<T> {
-    item: T,
+fn render_option<T: ToTokens>(opt: Option<T>) -> TokenStream2 {
+    match opt {
+        Some(item) => quote! { ::core::Option::Some(#item) },
+        None => quote! { ::core::Option::None },
+    }
 }
 
-impl ToTokens for HirToTokensAdapter<&Hir> {
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
-        match *self.item.kind() {
-            HirKind::Empty => push_quote!(tokens, {
-                #Prefix ::Hir::empty()
-            }),
-            HirKind::Literal(Literal(ref literal)) => {
-                let literal = proc_macro2::Literal::byte_string(literal);
+fn render_class(class: &Class) -> TokenStream2 {
+    match *class {
+        Class::Unicode(ref class) => {
+            let class = class.ranges().iter().map(|range| {
+                let start = range.start();
+                let end = range.end();
 
-                push_quote!(tokens, {
-                    #Prefix ::Hir::literal(#literal)
-                })
-            }
-            HirKind::Class(ref class) => {
-                let class = HirToTokensAdapter { item: class };
+                quote! { #Prefix ::ClassUnicodeRange::new(#start, #end) }
+            });
 
-                push_quote!(tokens, {
-                    #Prefix Hir::class(#class)
-                })
+            quote! {
+                #Prefix ::Class::Unicode(#Prefix ::ClassUnicode::new([#(#class,)*]))
             }
-            HirKind::Look(_) => todo!(),
-            HirKind::Repetition(Repetition {
-                min,
-                max,
-                greedy,
-                ref sub,
-            }) => {
-                let sub = HirToTokensAdapter { item: sub.as_ref() };
-                let max = HirToTokensAdapter { item: max };
+        }
+        Class::Bytes(ref class) => {
+            let class = class.ranges().iter().map(|range| {
+                let start = range.start();
+                let end = range.end();
 
-                push_quote!(tokens, {
-                    #Prefix ::Hir::repetition(#Prefix ::Repetition {
-                        min: #min,
-                        max: #max,
-                        greedy: #greedy,
-                        sub: ::alloc::boxed::Box::new(#sub),
-                    })
-                })
+                quote! { #Prefix ::ClassBytesRange::new(#start, #end) }
+            });
+
+            quote! {
+                #Prefix ::Class::Bytes(#Prefix ::ClassBytes::new([#(#class,)*]))
             }
-            HirKind::Capture(Capture {
-                index,
-                ref name,
-                ref sub,
-            }) => {}
-            HirKind::Concat(_) => todo!(),
-            HirKind::Alternation(_) => todo!(),
         }
     }
 }
 
-impl ToTokens for HirToTokensAdapter<&Class> {
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
-        todo!()
+macro_rules! render_look {
+    ($($Variant:ident)*) => {
+        fn render_look(look: Look) -> TokenStream2 {
+            match look {$(
+                Look::$Variant => quote! { #Prefix ::Look::$Variant },
+            )*}
+        }
+    }
+}
+
+render_look! {
+    Start
+    End
+    StartLF
+    EndLF
+    StartCRLF
+    EndCRLF
+    WordAscii
+    WordAsciiNegate
+    WordUnicode
+    WordUnicodeNegate
+    WordStartAscii
+    WordEndAscii
+    WordStartUnicode
+    WordEndUnicode
+    WordStartHalfAscii
+    WordEndHalfAscii
+    WordStartHalfUnicode
+    WordEndHalfUnicode
+}
+
+fn render_hir(hir: &Hir) -> TokenStream2 {
+    match *hir.kind() {
+        HirKind::Empty => {
+            quote! { #Prefix ::Hir::empty() }
+        }
+        HirKind::Literal(Literal(ref literal)) => {
+            let literal = LiteralToken::byte_string(literal);
+
+            quote! { #Prefix ::Hir::literal(#literal) }
+        }
+        HirKind::Class(ref class) => {
+            let class = render_class(class);
+
+            quote! { #Prefix ::Hir::class(#class) }
+        }
+        HirKind::Look(look) => {
+            let look = render_look(look);
+
+            quote! { #Prefix ::Hir::look(#look) }
+        }
+        HirKind::Repetition(Repetition {
+            min,
+            max,
+            greedy,
+            ref sub,
+        }) => {
+            let max = render_option(max.as_ref());
+            let sub = render_hir(sub);
+
+            quote! {
+                #Prefix ::Hir::repetition(#Prefix ::Repetition {
+                    min: #min,
+                    max: #max,
+                    greedy: #greedy,
+                    sub: #sub,
+                })
+            }
+        }
+        HirKind::Capture(Capture {
+            index,
+            ref name,
+            ref sub,
+        }) => {
+            let name = render_option(
+                name.as_deref()
+                    .map(|name| quote!({ ::alloc::boxed::Box::from(#name) })),
+            );
+
+            let sub = render_hir(sub);
+
+            quote! {
+                #Prefix ::Hir::capture(#Prefix ::Capture {
+                    index: #index,
+                    name: #name,
+                    sub: #sub,
+                })
+            }
+        }
+        HirKind::Concat(ref concat) => {
+            let concat = concat.iter().map(render_hir);
+
+            quote! {
+                #Prefix ::Hir::concat(::alloc::Vec::from([#(#concat,)*]))
+            }
+        }
+        HirKind::Alternation(ref alternation) => {
+            let alternation = alternation.iter().map(render_hir);
+
+            quote! {
+                #Prefix ::Hir::alternation(::alloc::Vec::from([#(#alternation,)*]))
+            }
+        }
     }
 }
 
