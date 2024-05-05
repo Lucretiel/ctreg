@@ -1,8 +1,8 @@
 [workspace]
-members = ["ctreg", "ctreg-macro"]
+members = ["ctreg", "ctreg-demo", "ctreg-macro"]
 resolver = "2"
 
 [workspace.dependencies]
-regex-automata = "0.4.6"
+regex-automata = { version = "0.4.6", default-features = false }
 regex-syntax = { version = "0.8.2", default-features = false }
 thiserror = { version = "1.0.59" }

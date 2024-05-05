@@ -7,6 +7,7 @@ edition = "2021"
 lazy_format = "2.0.3"
 quote = "1.0.36"
 regex-syntax = { workspace = true }
+regex-automata = { workspace = true, features = ["meta"] }
 thiserror = { workspace = true }
 syn = { version = "2.0.60", default-features = false, features = [
     "parsing",

@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+ctreg-macro = { path = "../ctreg-macro" }
 regex-syntax = { workspace = true }
-regex-automata = { workspace = true }
+regex-automata = { workspace = true, features = ["meta"] }

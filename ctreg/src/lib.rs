@@ -4,27 +4,23 @@ pub mod ඞ {
     pub use ::regex_syntax;
 }
 
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-}
+#[doc(hidden)]
+pub use ctreg_macro::regex_impl;
 
+#[macro_export]
 macro_rules! regex {
-    (static $NAME:ident: $Type:ident = $regex:literal) => {};
+    (pub $Type:ident = $regex:literal) => {
+        $crate::regex_impl! { pub $Type = $regex }
+    };
+
+    ($Type:ident = $regex:literal) => {
+        $crate::regex_impl! { $Type = $regex }
+    };
 }
 
-pub struct Group<'a> {
-    pub begin: usize,
+#[derive(Debug, Clone, Copy)]
+pub struct Capture<'a> {
+    pub start: usize,
     pub end: usize,
     pub content: &'a str,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
 }

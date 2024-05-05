@@ -1,43 +1,43 @@
+mod render;
+
 extern crate proc_macro;
 use proc_macro::TokenStream;
 
 use itertools::Itertools;
 use lazy_format::lazy_format;
-use proc_macro2::{Literal as LiteralToken, TokenStream as TokenStream2};
-use quote::{quote, quote_each_token, ToTokens};
+use proc_macro2::TokenStream as TokenStream2;
+use quote::{format_ident, quote};
+use regex_automata::meta::Regex;
 use regex_syntax::{
-    hir::{
-        self, Capture, Class, ClassUnicode, ClassUnicodeRange, Hir, HirKind, Literal, Look,
-        Repetition, Visitor,
-    },
+    hir::{self, Capture, Hir, HirKind, Repetition},
     parse as parse_regex,
 };
+use render::render_hir;
 use syn::{
     parse::{Parse, ParseStream},
-    parse_macro_input, Ident, LitStr, Token,
+    parse_macro_input,
+    spanned::Spanned,
+    Ident, Token,
 };
 use thiserror::Error;
 
+use self::render::{CaptureType, HirType, InputType, RegexType};
+
 struct Request {
-    public: bool,
-    name: syn::Ident,
+    public: Option<Token![pub]>,
     type_name: syn::Ident,
     regex: syn::LitStr,
 }
 
 impl Parse for Request {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let public: Option<Token![pub]> = input.parse()?;
-        let _static: Token![static] = input.parse()?;
-        let name = input.parse()?;
-        let _colon: Token![:] = input.parse()?;
+        let public = input.parse()?;
         let type_name = input.parse()?;
         let _eq: Token![=] = input.parse()?;
         let regex = input.parse()?;
 
         Ok(Self {
-            public: public.is_some(),
-            name,
+            public,
             type_name,
             regex,
         })
@@ -87,15 +87,22 @@ enum HirError {
 
     #[error("capture group {0:?} is repeating; capture groups can't repeat")]
     RepeatingCaptureGroup(String),
+
+    #[error("capture group name {0:?} is not a valid rust identifier")]
+    BadName(String),
 }
 
+/// Analyze and rewrite the syntax tree
+///
+/// - Collect information about the capture groups we'll be using
+/// - Erase anonymous capture groups
 fn process_hir_recurse<'a>(
     hir: &'a Hir,
     groups: &mut Vec<GroupInfo<'a>>,
     state: HirRepState,
 ) -> Result<Hir, HirError> {
     match *hir.kind() {
-        // Literals and their equivelents are passed verbatim
+        // Literals and their equivalents are passed verbatim
         HirKind::Empty => Ok(Hir::empty()),
         HirKind::Literal(hir::Literal(ref lit)) => Ok(Hir::literal(lit.clone())),
         HirKind::Class(ref class) => Ok(Hir::class(class.clone())),
@@ -111,11 +118,19 @@ fn process_hir_recurse<'a>(
                 ..*repetition
             }))
         }
+
+        // Capture groups are the most complicated. Need to remove anonymous
+        // groups, renumber other groups, and check repetition / optional states.
         HirKind::Capture(ref capture) => {
             let Some(name) = capture.name.as_deref() else {
                 // Anonymous groups don't capture in ctreg
                 return process_hir_recurse(&capture.sub, groups, state);
             };
+
+            // Let syn do the work for us of validating that this is a correct
+            // rust identifier
+            let _ident: Ident =
+                syn::parse_str(name).map_err(|_| HirError::BadName(name.to_owned()))?;
 
             if groups.iter().any(|group| group.name == name) {
                 return Err(HirError::DuplicateGroupName(name.to_owned()));
@@ -141,6 +156,8 @@ fn process_hir_recurse<'a>(
                 sub: Box::new(sub),
             }))
         }
+
+        // Concatenations are trivial
         HirKind::Concat(ref concat) => concat
             .iter()
             .map(|sub| process_hir_recurse(sub, groups, state))
@@ -158,175 +175,181 @@ fn process_hir_recurse<'a>(
     }
 }
 
-macro_rules! push_quote{
-    ($tokens:ident, {$($t:tt)*}) => { {quote::quote_each_token!{$tokens $($t)*};} }
+fn process_hir(hir: &Hir) -> Result<(Hir, Vec<GroupInfo<'_>>), HirError> {
+    let mut groups = Vec::new();
+
+    process_hir_recurse(hir, &mut groups, HirRepState::Definite).map(|hir| (hir, groups))
 }
 
-struct Prefix;
+fn regex_impl_result(input: Request) -> Result<TokenStream2, syn::Error> {
+    let hir = parse_regex(&input.regex.value()).map_err(|error| {
+        syn::Error::new(
+            input.regex.span(),
+            lazy_format!("error compiling regex:\n{error}"),
+        )
+    })?;
 
-impl ToTokens for Prefix {
-    fn to_tokens(&self, mut tokens: &mut TokenStream2) {
-        push_quote!(tokens, { ::ctreg::private::regex_automata::hir });
-    }
-}
+    let (hir, groups) =
+        process_hir(&hir).map_err(|error| syn::Error::new(input.regex.span(), error))?;
 
-fn render_option<T: ToTokens>(opt: Option<T>) -> TokenStream2 {
-    match opt {
-        Some(item) => quote! { ::core::Option::Some(#item) },
-        None => quote! { ::core::Option::None },
-    }
-}
+    // We don't actually use the compiled regex for anything, we just need to
+    // ensure that the `hir` does compile correctly.
+    let _compiled_regex = Regex::builder().build_from_hir(&hir).map_err(|error| {
+        syn::Error::new(
+            input.regex.span(),
+            lazy_format!("error compiling regex:\n{error}"),
+        )
+    })?;
 
-fn render_class(class: &Class) -> TokenStream2 {
-    match *class {
-        Class::Unicode(ref class) => {
-            let class = class.ranges().iter().map(|range| {
-                let start = range.start();
-                let end = range.end();
+    let public = input.public;
+    let type_name = &input.type_name;
 
-                quote! { #Prefix ::ClassUnicodeRange::new(#start, #end) }
-            });
+    let slots_ident = Ident::new("slots", type_name.span());
+    let haystack_ident = Ident::new("haystack", type_name.span());
 
-            quote! {
-                #Prefix ::Class::Unicode(#Prefix ::ClassUnicode::new([#(#class,)*]))
-            }
-        }
-        Class::Bytes(ref class) => {
-            let class = class.ranges().iter().map(|range| {
-                let start = range.start();
-                let end = range.end();
+    let mod_name = format_ident!("Mod{type_name}");
+    let matches_type_name = format_ident!("{type_name}Matches");
 
-                quote! { #Prefix ::ClassBytesRange::new(#start, #end) }
-            });
+    let matches_fields_definitions = groups.iter().map(|&GroupInfo { name, optional, .. }| {
+        let type_name = match optional {
+            false => quote! { #CaptureType<'a> },
+            true => quote! { ::core::option::Option<#CaptureType<'a>> },
+        };
 
-            quote! {
-                #Prefix ::Class::Bytes(#Prefix ::ClassBytes::new([#(#class,)*]))
-            }
-        }
-    }
-}
+        let field_name = format_ident!("{name}", span = type_name.span());
 
-macro_rules! render_look {
-    ($($Variant:ident)*) => {
-        fn render_look(look: Look) -> TokenStream2 {
-            match look {$(
-                Look::$Variant => quote! { #Prefix ::Look::$Variant },
-            )*}
-        }
-    }
-}
+        quote! { #field_name : #type_name }
+    });
 
-render_look! {
-    Start
-    End
-    StartLF
-    EndLF
-    StartCRLF
-    EndCRLF
-    WordAscii
-    WordAsciiNegate
-    WordUnicode
-    WordUnicodeNegate
-    WordStartAscii
-    WordEndAscii
-    WordStartUnicode
-    WordEndUnicode
-    WordStartHalfAscii
-    WordEndHalfAscii
-    WordStartHalfUnicode
-    WordEndHalfUnicode
-}
+    let matches_field_populators = groups.iter().map(
+        |&GroupInfo {
+             name,
+             optional,
+             index,
+         }| {
+            let slot_start = (index as usize) * 2;
+            let slot_end = slot_start + 1;
 
-fn render_hir(hir: &Hir) -> TokenStream2 {
-    match *hir.kind() {
-        HirKind::Empty => {
-            quote! { #Prefix ::Hir::empty() }
-        }
-        HirKind::Literal(Literal(ref literal)) => {
-            let literal = LiteralToken::byte_string(literal);
+            let field_name = format_ident!("{name}", span = type_name.span());
 
-            quote! { #Prefix ::Hir::literal(#literal) }
-        }
-        HirKind::Class(ref class) => {
-            let class = render_class(class);
+            let populate = quote! {{
+                let slot_start = #slots_ident[#slot_start];
+                let slot_end = #slots_ident[#slot_end];
 
-            quote! { #Prefix ::Hir::class(#class) }
-        }
-        HirKind::Look(look) => {
-            let look = render_look(look);
+                match slot_start {
+                    None => None,
+                    Some(start) => {
+                        let start = start.get();
+                        let end = unsafe { slot_end.unwrap_unchecked() }.get();
+                        let content = unsafe { #haystack_ident.get_unchecked(start..end) };
 
-            quote! { #Prefix ::Hir::look(#look) }
-        }
-        HirKind::Repetition(Repetition {
-            min,
-            max,
-            greedy,
-            ref sub,
-        }) => {
-            let max = render_option(max.as_ref());
-            let sub = render_hir(sub);
+                        Some(#CaptureType {start, end, content})
+                    }
+                }
+            }};
 
-            quote! {
-                #Prefix ::Hir::repetition(#Prefix ::Repetition {
-                    min: #min,
-                    max: #max,
-                    greedy: #greedy,
-                    sub: #sub,
+            let expr = match optional {
+                true => populate,
+                false => quote! {
+                    match #populate {
+                        Some(capture) => capture,
+                        None => unsafe { ::core::hint::unreachable_unchecked() },
+                    }
+                },
+            };
+
+            quote! { #field_name : #expr }
+        },
+    );
+
+    let num_capture_groups = groups.len();
+
+    let captures_impl = (num_capture_groups > 0).then(|| quote! {
+        impl #type_name {
+            #[inline]
+            #[must_use]
+            pub fn captures<'i>(&self, #haystack_ident: &'i str) -> ::core::option::Option<#matches_type_name<'i>> {
+                let mut #slots_ident = [::core::option::Option::None; (#num_capture_groups + 1) * 2];
+                let _ = self.regex.search_slots(&#InputType::new(#haystack_ident), &mut #slots_ident)?;
+
+                ::core::option::Option::Some(#matches_type_name {
+                    #(#matches_field_populators ,)*
                 })
             }
         }
-        HirKind::Capture(Capture {
-            index,
-            ref name,
-            ref sub,
-        }) => {
-            let name = render_option(
-                name.as_deref()
-                    .map(|name| quote!({ ::alloc::boxed::Box::from(#name) })),
-            );
 
-            let sub = render_hir(sub);
-
-            quote! {
-                #Prefix ::Hir::capture(#Prefix ::Capture {
-                    index: #index,
-                    name: #name,
-                    sub: #sub,
-                })
-            }
+        #[derive(Debug, Clone, Copy)]
+        pub struct #matches_type_name<'a> {
+            #(pub #matches_fields_definitions,)*
         }
-        HirKind::Concat(ref concat) => {
-            let concat = concat.iter().map(render_hir);
+    });
 
-            quote! {
-                #Prefix ::Hir::concat(::alloc::Vec::from([#(#concat,)*]))
-            }
+    let captures_export = captures_impl.is_some().then(|| {
+        quote! {
+            #public use #mod_name::#matches_type_name
         }
-        HirKind::Alternation(ref alternation) => {
-            let alternation = alternation.iter().map(render_hir);
+    });
 
-            quote! {
-                #Prefix ::Hir::alternation(::alloc::Vec::from([#(#alternation,)*]))
+    let rendered_hir = render_hir(&hir);
+
+    Ok(quote! {
+        #[doc(hidden)]
+        #[allow(non_snake_case)]
+        mod #mod_name {
+            #[derive(Debug, Clone)]
+            pub struct #type_name {
+                regex: #RegexType,
             }
+
+            impl #type_name {
+                pub fn new() -> Self {
+                    let hir: #HirType = #rendered_hir;
+                    let regex = #RegexType::builder()
+                        .build_from_hir(&hir)
+                        .expect("regex compilation failed, despite compile-time verification");
+                    Self { regex }
+                }
+
+                #[inline]
+                #[must_use]
+                pub fn is_match(&self, haystack: &str) -> bool {
+                    self.regex.is_match(haystack)
+                }
+
+                #[inline]
+                #[must_use]
+                pub fn find<'i>(&self, haystack: &'i str) -> ::core::option::Option<#CaptureType<'i>> {
+                    let capture = self.regex.find(haystack)?;
+                    let span = capture.span();
+
+                    let start = span.start;
+                    let end = span.end;
+                    let content = unsafe { haystack.get_unchecked(start..end) };
+
+                    Some(#CaptureType { start, end, content })
+                }
+            }
+
+            impl ::core::default::Default for #type_name {
+                fn default() -> Self {
+                    Self::new()
+                }
+            }
+
+            #captures_impl
         }
-    }
+
+        #public use #mod_name::#type_name;
+        #captures_export;
+
+    })
 }
 
 #[proc_macro]
 pub fn regex_impl(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as Request);
 
-    let regex = match parse_regex(&input.regex.value()) {
-        Ok(regex) => regex,
-        Err(err) => {
-            return syn::Error::new(
-                input.regex.span(),
-                lazy_format!("error compiling regex: {err}"),
-            )
-            .into_compile_error()
-            .into()
-        }
-    };
-
-    todo!()
+    regex_impl_result(input)
+        .unwrap_or_else(|error| error.into_compile_error())
+        .into()
 }
