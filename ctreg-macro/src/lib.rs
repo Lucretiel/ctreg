@@ -16,7 +16,7 @@ use regex_syntax::{
     hir::{self, Capture, Hir, HirKind, Repetition},
     parse as parse_regex,
 };
-use render::render_hir;
+use render::hir_expression;
 use syn::{
     parse::{Parse, ParseStream},
     parse_macro_input,
@@ -187,7 +187,7 @@ fn process_hir(hir: &Hir) -> Result<(Hir, Vec<GroupInfo<'_>>), HirError> {
     process_hir_recurse(hir, &mut groups, HirRepState::Definite).map(|hir| (hir, groups))
 }
 
-fn regex_impl_result(input: Request) -> Result<TokenStream2, syn::Error> {
+fn regex_impl_result(input: &Request) -> Result<TokenStream2, syn::Error> {
     let hir = parse_regex(&input.regex.value()).map_err(|error| {
         syn::Error::new(
             input.regex.span(),
@@ -296,7 +296,7 @@ fn regex_impl_result(input: Request) -> Result<TokenStream2, syn::Error> {
         }
     });
 
-    let rendered_hir = render_hir(&hir);
+    let rendered_hir = hir_expression(&hir);
 
     Ok(quote! {
         #[doc(hidden)]
@@ -357,7 +357,7 @@ fn regex_impl_result(input: Request) -> Result<TokenStream2, syn::Error> {
 pub fn regex_impl(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as Request);
 
-    regex_impl_result(input)
+    regex_impl_result(&input)
         .unwrap_or_else(|error| error.into_compile_error())
         .into()
 }

@@ -98,7 +98,7 @@ render_look! {
 
 #[inline]
 #[must_use]
-pub fn render_hir(hir: &Hir) -> TokenStream2 {
+pub fn hir_expression(hir: &Hir) -> TokenStream2 {
     match *hir.kind() {
         HirKind::Empty => {
             quote! { #HirType::empty() }
@@ -129,7 +129,7 @@ pub fn render_hir(hir: &Hir) -> TokenStream2 {
                 Some(max) => quote! { ::core::option::Option::Some(#max) },
             };
 
-            let sub = render_hir(sub);
+            let sub = hir_expression(sub);
 
             quote! {
                 #HirType::repetition(#HirMod::Repetition {
@@ -154,7 +154,7 @@ pub fn render_hir(hir: &Hir) -> TokenStream2 {
                 },
             };
 
-            let sub = render_hir(sub);
+            let sub = hir_expression(sub);
 
             quote! {
                 #HirType::capture(#HirMod::Capture {
@@ -165,14 +165,14 @@ pub fn render_hir(hir: &Hir) -> TokenStream2 {
             }
         }
         HirKind::Concat(ref concat) => {
-            let concat = concat.iter().map(render_hir);
+            let concat = concat.iter().map(hir_expression);
 
             quote! {
                 #HirType::concat(::std::vec::Vec::from([#(#concat,)*]))
             }
         }
         HirKind::Alternation(ref alternation) => {
-            let alternation = alternation.iter().map(render_hir);
+            let alternation = alternation.iter().map(hir_expression);
 
             quote! {
                 #HirType::alternation(::std::vec::Vec::from([#(#alternation,)*]))
