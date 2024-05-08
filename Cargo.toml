@@ -2,8 +2,19 @@
 members = ["ctreg", "ctreg-macro"]
 resolver = "2"
 
+[workspace.package]
+edition = "2021"
+authors = ["Nathan West <Lucretiel@gmail.com>"]
+
+readme = "README.md"
+license = "MPL-2.0"
+repository = "https://github.com/Lucretiel/ctreg"
+
 [workspace.dependencies]
 cool_asserts = { version = "2.0.3" }
-regex-automata = { version = "0.4.6", default-features = false }
-regex-syntax = { version = "0.8.2", default-features = false }
 thiserror = { version = "1.0.59" }
+
+# TODO: In the near future, add feature flags mirroring those in regex and
+# disable default features
+regex-automata = { version = "0.4.6" }
+regex-syntax = { version = "0.8.2" }

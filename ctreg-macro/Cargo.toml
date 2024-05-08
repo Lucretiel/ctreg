@@ -1,13 +1,13 @@
 [package]
 name = "ctreg-macro"
 version = "1.0.0"
-edition = "2021"
-authors = ["Nathan West <Lucretiel@gmail.com>"]
-
-readme = "../README.md"
-license = "MPL-2.0"
 description = "Proc-macro implementation for ctreg"
-repository = "https://github.com/Lucretiel/ctreg"
+
+edition.workspace = true
+authors.workspace = true
+readme.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 regex-syntax = { workspace = true }

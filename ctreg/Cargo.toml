@@ -1,16 +1,16 @@
 [package]
 name = "ctreg"
 version = "1.0.0"
-edition = "2021"
-authors = ["Nathan West <Lucretiel@gmail.com>"]
-
-readme = "../README.md"
-license = "MPL-2.0"
 description = "Compile-time regular expressions the way they were always meant to be"
-repository = "https://github.com/Lucretiel/ctreg"
+
+edition.workspace = true
+authors.workspace = true
+readme.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
-ctreg-macro = { path = "../ctreg-macro" }
+ctreg-macro = { path = "../ctreg-macro", version = "1.0.0" }
 regex-syntax = { workspace = true }
 regex-automata = { workspace = true, features = ["meta"] }
 
