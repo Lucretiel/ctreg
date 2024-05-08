@@ -79,9 +79,9 @@ type is generated.
 
 Because it is not yet possible to create a regular expression in a `const`
 context, this macro operates by creating a type instead of an object. In the
-spirit of 0-cost abstraction, we ask the caller to use their own `OnceLock` or
-whatever other abstraction is appropriate to manage the creation and lifespan
-of this object.
+spirit of 0-cost abstraction, we currently ask the caller to use their own
+`OnceLock` or whatever other abstraction is appropriate to manage the creation
+and lifespan of this object. This may change in the future.
 */
 #[macro_export]
 macro_rules! regex {
