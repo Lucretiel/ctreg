@@ -8,7 +8,6 @@ mod render;
 extern crate proc_macro;
 use proc_macro::TokenStream;
 
-use itertools::Itertools;
 use lazy_format::lazy_format;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
@@ -137,10 +136,12 @@ fn process_hir_recurse<'a>(
             let _ident: Ident =
                 syn::parse_str(name).map_err(|_| HirError::BadName(name.to_owned()))?;
 
+            // Check duplicate groups
             if groups.iter().any(|group| group.name == name) {
                 return Err(HirError::DuplicateGroupName(name.to_owned()));
             }
 
+            // Check repeating groups
             if state == HirRepState::Repeating {
                 return Err(HirError::RepeatingCaptureGroup(name.to_owned()));
             }
@@ -166,7 +167,7 @@ fn process_hir_recurse<'a>(
         HirKind::Concat(ref concat) => concat
             .iter()
             .map(|sub| process_hir_recurse(sub, groups, state))
-            .try_collect()
+            .collect::<Result<_, _>>()
             .map(Hir::concat),
 
         // regex syntax guarantees that alternations have at least 2 variants,
@@ -175,7 +176,7 @@ fn process_hir_recurse<'a>(
         HirKind::Alternation(ref alt) => alt
             .iter()
             .map(|sub| process_hir_recurse(sub, groups, state.and(HirRepState::Optional)))
-            .try_collect()
+            .collect::<Result<_, _>>()
             .map(Hir::alternation),
     }
 }
