@@ -1,8 +1,9 @@
 [workspace]
-members = ["ctreg", "ctreg-demo", "ctreg-macro"]
+members = ["ctreg", "ctreg-macro"]
 resolver = "2"
 
 [workspace.dependencies]
+cool_asserts = { version = "2.0.3" }
 regex-automata = { version = "0.4.6", default-features = false }
 regex-syntax = { version = "0.8.2", default-features = false }
 thiserror = { version = "1.0.59" }

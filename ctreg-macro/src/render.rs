@@ -32,6 +32,8 @@ prefixes! {
     HirType = { #HirMod::Hir }
 }
 
+#[inline]
+#[must_use]
 fn render_class(class: &Class) -> TokenStream2 {
     match *class {
         Class::Unicode(ref class) => {
@@ -63,6 +65,8 @@ fn render_class(class: &Class) -> TokenStream2 {
 
 macro_rules! render_look {
     ($($Variant:ident)*) => {
+        #[inline]
+        #[must_use]
         fn render_look(look: Look) -> TokenStream2 {
             match look {$(
                 Look::$Variant => quote! { #HirMod ::Look::$Variant },
@@ -92,6 +96,8 @@ render_look! {
     WordEndHalfUnicode
 }
 
+#[inline]
+#[must_use]
 pub fn render_hir(hir: &Hir) -> TokenStream2 {
     match *hir.kind() {
         HirKind::Empty => {
@@ -143,7 +149,7 @@ pub fn render_hir(hir: &Hir) -> TokenStream2 {
                 None => quote! { ::core::option::Option::None },
                 Some(name) => quote! {
                     ::core::option::Option::Some(
-                        ::std::boxed::Box::from(#name)
+                        ::core::convert::From::from(#name)
                     )
                 },
             };

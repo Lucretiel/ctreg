@@ -1,3 +1,8 @@
+/*!
+Implementation of the proc macro for `ctreg`. You should never use this crate
+directly.
+ */
+
 mod render;
 
 extern crate proc_macro;
@@ -208,7 +213,7 @@ fn regex_impl_result(input: Request) -> Result<TokenStream2, syn::Error> {
     let haystack_ident = Ident::new("haystack", type_name.span());
 
     let mod_name = format_ident!("Mod{type_name}");
-    let matches_type_name = format_ident!("{type_name}Matches");
+    let matches_type_name = format_ident!("{type_name}Captures");
 
     let matches_fields_definitions = groups.iter().map(|&GroupInfo { name, optional, .. }| {
         let type_name = match optional {
@@ -302,6 +307,8 @@ fn regex_impl_result(input: Request) -> Result<TokenStream2, syn::Error> {
             }
 
             impl #type_name {
+                #[inline]
+                #[must_use]
                 pub fn new() -> Self {
                     let hir: #HirType = #rendered_hir;
                     let regex = #RegexType::builder()
