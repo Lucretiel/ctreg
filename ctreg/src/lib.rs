@@ -57,9 +57,9 @@ for an example.
 
 This macro creates a type, called `$Type`, representing the given `$regex`. The
 regular expression is evaluated at program compile time, and the `$Type` is
-emitted containing its pre-parsed, pre-normalized representation, with a
-regex-like API for searching and matching capture groups. See the
-[`demo::HelloWorld`] type for an example of the methods it generates.
+emitted containing its parsed, normalized representation, with a regex-like API
+for searching and matching capture groups. See the [`demo::HelloWorld`] type
+for an example of the methods it generates.
 
 Additionally, it creates a type called `${Type}Captures`, which contains a
 [`Capture`] field for each named capture group in the regular expression. See
