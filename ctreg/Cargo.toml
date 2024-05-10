@@ -1,6 +1,6 @@
 [package]
 name = "ctreg"
-version = "1.0.0"
+version = "1.0.1"
 description = "Compile-time regular expressions the way they were always meant to be"
 
 edition.workspace = true
