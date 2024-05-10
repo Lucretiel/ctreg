@@ -1,14 +1,14 @@
 /*!
-`ctreg` (pronounced cuh-tredge, in the style of Cthulhu) is compile-time regular
-expressions the way they were always meant to be. See the [`regex`] macro for
-details.
+`ctreg` (pronounced cuh-tredge, in the style of Cthulhu) is a macro that uses
+compile-time processing to make your regular expressions faster and easier to
+use. See the [`regex`] macro for details.
 
 ```
 use ctreg::regex;
 
 // Create a regular expression with the macro. This regular expression is
-// compiled at compile time and its internal representation is emitted as the
-// `HelloWorld` type.
+// evaluated at compile time and its parsed, normalized representation is
+// emitted as the `HelloWorld` type.
 regex! { pub HelloWorld = "(?<greeting>[a-zA-Z0-9-_.]+)(, (?<target>[a-zA-Z0-9-_.]+))?!" }
 
 // Create an instance of the regular expression.
@@ -52,14 +52,14 @@ pub mod ඞ {
 pub use ctreg_macro::regex_impl;
 
 /**
-Create a compile-time regular expression. See the [module docs][crate] for an
-example.
+Create a type representing a regular expression. See the [module docs][crate]
+for an example.
 
 This macro creates a type, called `$Type`, representing the given `$regex`. The
 regular expression is evaluated at program compile time, and the `$Type` is
-emitted containing its compiled internal representation, with a regex-like API
-for searching and matching capture groups. See the [`demo::HelloWorld`] type
-for an example of the methods it generates.
+emitted containing its pre-parsed, pre-normalized representation, with a
+regex-like API for searching and matching capture groups. See the
+[`demo::HelloWorld`] type for an example of the methods it generates.
 
 Additionally, it creates a type called `${Type}Captures`, which contains a
 [`Capture`] field for each named capture group in the regular expression. See
@@ -78,10 +78,14 @@ If the regex has no named capture groups, no `captures` method or `Captures`
 type is generated.
 
 Because it is not yet possible to create a regular expression in a `const`
-context, this macro operates by creating a type instead of an object. In the
-spirit of 0-cost abstraction, we currently ask the caller to use their own
-`OnceLock` or whatever other abstraction is appropriate to manage the creation
-and lifespan of this object. This may change in the future.
+context, this macro operates by creating a type instead of an object; this
+types constructor builds a regex at runtime using the post-parse [normalized
+form](https://docs.rs/regex-syntax/latest/regex_syntax/hir/struct.Hir.html) of
+the expression. This means that some (but not all) of the runtime costs of
+constructing the internal `Regex` object are ameliorated. In the spirit of
+0-cost abstraction, we currently ask the caller to use their own `OnceLock` or
+whatever other abstraction is appropriate to manage the creation and lifespan
+of this object. This may change in the future.
 */
 #[macro_export]
 macro_rules! regex {
