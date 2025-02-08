@@ -16,3 +16,11 @@ regex-automata = { workspace = true, features = ["meta"] }
 
 [dev-dependencies]
 cool_asserts = { workspace = true }
+
+[features]
+# If enabled, the demo module will be included. This should really only be
+# needed when generating docs.
+demo = []
+
+[package.metadata.docs.rs]
+features = ["demo"]

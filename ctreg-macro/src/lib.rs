@@ -299,6 +299,9 @@ fn regex_impl_result(input: &Request) -> Result<TokenStream2, syn::Error> {
     let rendered_hir = hir_expression(&hir);
 
     Ok(quote! {
+        // The implementations are put into a submodule to ensure that the
+        // caller of the regex macro doesn't have access to the internals
+        // of these types
         #[doc(hidden)]
         #[allow(non_snake_case)]
         mod #mod_name {
